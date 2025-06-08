@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Code Editor & Whiteboard</title>
+<style>
+  :root {
+    --bg-color: #fff;
+    --text-color: #000;
+    --toolbar-bg: #f0f0f0;
+  }
+  [data-theme="dark"] {
+    --bg-color: #121212;
+    --text-color: #eee;
+    --toolbar-bg: #1e1e1e;
+  }
+  body, html {
+    margin: 0; padding: 0; height: 100%;
+    font-family: sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    overflow: hidden;
+  }
+  .top-bar {
+    display: flex;
+    background-color: var(--toolbar-bg);
+    height: 50px;
+    align-items: center;
+    padding: 0 10px;
+    user-select: none;
+  }
+  .top-bar button {
+    padding: 0.5rem 1rem;
+    background: none;
+    color: var(--text-color);
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    border-radius: 4px;
+    margin-right: 8px;
+    transition: background-color 0.3s;
+  }
+  .top-bar button.active {
+    background-color: #8884;
+  }
+  .top-bar .right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+  }
+  .content {
+    height: calc(100% - 50px);
+    position: relative;
+  }
+  #editor, #whiteboard {
+    width: 100%;
+    height: 100%;
+    display: none;
+    position: relative;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+  }
+  #editor.active, #whiteboard.active {
+    display: block;
+  }
+  #canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: crosshair;
+    background: var(--bg-color);
+  }
+  #whiteboard-tools {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 20;
+    background-color: var(--toolbar-bg);
+    padding: 8px 12px;
+    border-radius: 8px;
+    user-select: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    max-width: calc(100% - 40px);
+  }
+  #whiteboard-tools input[type="color"],
+  #whiteboard-tools input[type="range"],
+  #whiteboard-tools select,
+  #whiteboard-tools button,
+  #whiteboard-tools label {
+    margin: 0 4px 0 0;
+    font-size: 14px;
+  }
+  #whiteboard-tools label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+  #whiteboard-tools label input {
+    margin-right: 4px;
+  }
+  /* Resize handles for image */
+  .resize-handle {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: #444;
+    border-radius: 50%;
+    cursor: se-resize;
+    right: 0;
+    bottom: 0;
+    z-index: 25;
+  }
+  /* Modal styles */
+  #page-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: #0008;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #page-modal > div {
+    background: #fff;
+    padding: 32px 24px;
+    border-radius: 12px;
+    min-width: 320px;
+    box-shadow: 0 4px 32px #0004;
+  }
+  #page-modal h2 {
+    margin-top: 0;
+  }
+  #page-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 12px;
+  }
+  #new-page-name {
+    margin-top: 12px;
+    width: 70%;
+  }
+  #create-page-btn {
+    margin-left: 8px;
+  }
+  #webcam-panel {
+    display: none;
+    position: fixed;
+    top: 50px;
+    right: 0;
+    width: 35vw;
+    height: calc(100% - 50px);
+    background: #111;
+    z-index: 2000;
+    box-shadow: -2px 0 12px #0008;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+</head>
+<body data-theme="light">
+
+<div class="top-bar">
+  <button id="btn-editor" class="active">Code Editor</button>
+  <button id="btn-whiteboard">Whiteboard</button>
+  <div class="right">
+    <button id="toggle-theme" title="Toggle Dark/Light Mode">🌙</button>
+  </div>
+</div>
+
+<div class="content">
+  <div id="editor" class="active"></div>
+  <div id="whiteboard">
+    <div id="whiteboard-tools">
+      <select id="tool">
+        <option value="pencil">Pencil</option>
+        <option value="pen">Pen</option>
+        <option value="eraser">Eraser</option>
+        <option value="stroke-eraser">Stroke Eraser</option>
+        <option value="highlighter">Highlighter</option>
+        <option value="rectangle">Rectangle</option>
+        <option value="rounded-rectangle">Rounded Rectangle</option>
+        <option value="square">Square</option>
+        <option value="rounded-square">Rounded Square</option>
+        <option value="circle">Circle</option>
+        <option value="ellipse">Ellipse</option>
+      </select>
+      <input type="color" id="strokeColor" value="#000000" title="Stroke Color">
+      <label><input type="checkbox" id="fillShape"> Fill</label>
+      <input type="color" id="fillColor" value="#ff0000" title="Fill Color" style="vertical-align: middle;">
+      <input type="range" id="sizePicker" min="1" max="50" value="5" title="Size">
+      <input type="file" id="imgUpload" accept="image/*" title="Upload Image">
+      <button id="clearCanvas" title="Clear Whiteboard">Clear</button>
+      <button id="saveCanvas" title="Save Whiteboard as Image">Save</button>
+      <input type="text" id="cfLink" placeholder="Paste any webpage link..." style="width:220px;">
+      <button id="embedCFBtn" title="Embed Webpage">Embed</button>
+      <button id="add-to-list-btn" style="margin-left:8px;">Add to List</button>
+      <button id="switch-page-btn" style="margin-left:8px;">Switch Page</button>
+      <button id="webcam-btn" title="Show Webcam" style="margin-left:8px;">📷</button>
+    </div>
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+
+<div id="cf-embed-container" style="display:none; position:absolute; top:60px; left:10px; right:10px; bottom:10px; z-index:10; background:#fff; border:2px solid #888; border-radius:8px; overflow:hidden;">
+  <div style="text-align:right; background:#eee; padding:2px 8px;">
+    <button id="closeCFEmbed" style="font-size:18px; background:none; border:none; cursor:pointer;">✖</button>
+  </div>
+  <iframe id="cf-iframe" src="" style="width:100%; height:calc(100% - 30px); border:none;"></iframe>
+</div>
+
+<div id="page-modal" style="position:fixed;inset:0;z-index:1000;background:#0008;display:flex;align-items:center;justify-content:center;">
+  <div style="background:#fff;padding:32px 24px;border-radius:12px;min-width:320px;box-shadow:0 4px 32px #0004;">
+    <h2 style="margin-top:0">Select or Create Page</h2>
+    <div id="page-list"></div>
+    <input id="new-page-name" type="text" placeholder="New page name..." style="margin-top:12px;width:70%">
+    <button id="create-page-btn" style="margin-left:8px;">Create</button>
+  </div>
+</div>
+
+<div id="webcam-panel" style="display:none; position:fixed; top:50px; right:0; width:35vw; height:calc(100% - 50px); background:#111; z-index:2000; box-shadow:-2px 0 12px #0008; flex-direction:column; align-items:center; justify-content:center;">
+  <video id="webcam-video" autoplay playsinline style="width:100%; height:100%; object-fit:cover; background:#222;"></video>
+  <button id="close-webcam-btn" style="position:absolute;top:8px;right:12px;font-size:22px;background:none;border:none;color:#fff;cursor:pointer;">✖</button>
+</div>
+
+<script>
+// Monaco Editor Initialization
+require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+require(["vs/editor/editor.main"], function () {
+  window.editor = monaco.editor.create(document.getElementById('editor'), {
+    value: "// Start coding here...\n",
+    language: "javascript",
+    theme: document.body.getAttribute('data-theme') === 'dark' ? 'vs-dark' : 'vs',
+    automaticLayout: true,
+    fontSize: 16,
+  });
+});
+
+// DOM references
+const btnEditor = document.getElementById('btn-editor');
+const btnWhiteboard = document.getElementById('btn-whiteboard');
+const editorDiv = document.getElementById('editor');
+const whiteboardDiv = document.getElementById('whiteboard');
+const toggleThemeBtn = document.getElementById('toggle-theme');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const toolSelect = document.getElementById('tool');
+const strokeColorInput = document.getElementById('strokeColor');
+const fillShapeCheckbox = document.getElementById('fillShape');
+const fillColorInput = document.getElementById('fillColor');
+const sizePicker = document.getElementById('sizePicker');
+const imgUpload = document.getElementById('imgUpload');
+const clearCanvasBtn = document.getElementById('clearCanvas');
+const saveCanvasBtn = document.getElementById('saveCanvas');
+const cfLink = document.getElementById('cfLink');
+const embedCFBtn = document.getElementById('embedCFBtn');
+const cfEmbedContainer = document.getElementById('cf-embed-container');
+const cfIframe = document.getElementById('cf-iframe');
+const closeCFEmbed = document.getElementById('closeCFEmbed');
+const pageModal = document.getElementById('page-modal');
+const pageListDiv = document.getElementById('page-list');
+const newPageName = document.getElementById('new-page-name');
+const createPageBtn = document.getElementById('create-page-btn');
+const addToListBtn = document.getElementById('add-to-list-btn');
+const switchPageBtn = document.getElementById('switch-page-btn');
+const webcamPanel = document.getElementById('webcam-panel');
+const webcamBtn = document.getElementById('webcam-btn');
+const webcamVideo = document.getElementById('webcam-video');
+const closeWebcamBtn = document.getElementById('close-webcam-btn');
+let webcamStream = null;
+
+// --- Per-tool stroke width memory ---
+const defaultToolSizes = {
+  pencil: 3,
+  pen: 5,
+  highlighter: 20,
+  eraser: 20,
+  'stroke-eraser': 20,
+  rectangle: 3,
+  'rounded-rectangle': 3,
+  square: 3,
+  'rounded-square': 3,
+  circle: 3,
+  ellipse: 3
+};
+const toolSizes = {...defaultToolSizes};
+
+toolSelect.addEventListener('change', () => {
+  const tool = toolSelect.value;
+  sizePicker.value = toolSizes[tool] || 3;
+});
+sizePicker.addEventListener('input', () => {
+  const tool = toolSelect.value;
+  toolSizes[tool] = Number(sizePicker.value);
+});
+window.addEventListener('DOMContentLoaded', () => {
+  const tool = toolSelect.value;
+  sizePicker.value = toolSizes[tool] || 3;
+});
+
+// --- Multi-page localStorage logic ---
+let currentPage = null;
+const PAGE_PREFIX = "wbapp_page_";
+const CODE_PREFIX = "wbapp_code_";
+
+function listPages() {
+  pageListDiv.innerHTML = '';
+  const keys = Object.keys(localStorage).filter(k => k.startsWith(PAGE_PREFIX));
+  if (keys.length === 0) {
+    pageListDiv.innerHTML = '<div style="color:#888;">No pages yet.</div>';
+  } else {
+    keys.forEach(k => {
+      const name = k.slice(PAGE_PREFIX.length);
+
+      // Container for button and cross
+      const row = document.createElement('div');
+      row.style = "display:flex;align-items:center;justify-content:space-between;gap:8px;";
+
+      // Page select button
+      const btn = document.createElement('button');
+      btn.textContent = name;
+      btn.style = "flex:1;display:block;width:100%;margin:4px 0;padding:8px 0;font-size:16px;text-align:left;";
+      btn.onclick = () => selectPage(name);
+
+      // Cross (delete) button
+      const cross = document.createElement('span');
+      cross.textContent = '✖';
+      cross.title = 'Delete this page';
+      cross.style = "color:#b00;cursor:pointer;font-size:18px;padding:0 8px;transition:color 0.2s;";
+      cross.onmouseover = () => { cross.style.color = '#f33'; };
+      cross.onmouseout = () => { cross.style.color = '#b00'; };
+      cross.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm(`Delete page "${name}"? This cannot be undone.`)) {
+          localStorage.removeItem(PAGE_PREFIX + name);
+          localStorage.removeItem(CODE_PREFIX + name);
+          listPages();
+        }
+      };
+
+      row.appendChild(btn);
+      row.appendChild(cross);
+      pageListDiv.appendChild(row);
+    });
+  }
+}
+
+createPageBtn.onclick = () => {
+  const name = newPageName.value.trim();
+  if (!name) return;
+  if (localStorage.getItem(PAGE_PREFIX + name)) {
+    alert("Page already exists!");
+    return;
+  }
+  savePageAs(name, [], toolSizes, "// Start coding here...\n");
+  selectPage(name);
+  pageModal.style.display = "none";
+  newPageName.value = "";
+};
+
+addToListBtn.onclick = () => {
+  const name = prompt("Enter a name for the new page:");
+  if (!name) return;
+  if (localStorage.getItem(PAGE_PREFIX + name)) {
+    alert("Page already exists!");
+    return;
+  }
+  savePageAs(name, paths, toolSizes, window.editor ? window.editor.getValue() : "// Start coding here...\n");
+  alert("Page added! You can switch to it from the page list.");
+  listPages();
+};
+
+switchPageBtn.onclick = () => {
+  pageModal.style.display = "flex";
+  listPages();
+};
+
+function savePageAs(name, pathsToSave, toolSizesToSave, code) {
+  const serializablePaths = pathsToSave.map(obj => {
+    if (obj.tool === 'image' && obj.image && obj.image.src) {
+      return {...obj, imageData: obj.image.src, image: undefined};
+    }
+    return obj;
+  });
+  localStorage.setItem(PAGE_PREFIX + name, JSON.stringify({
+    paths: serializablePaths,
+    toolSizes: {...toolSizesToSave}
+  }));
+  localStorage.setItem(CODE_PREFIX + name, code);
+}
+
+function savePage() {
+  if (!currentPage) return;
+  savePageAs(currentPage, paths, toolSizes, window.editor ? window.editor.getValue() : "// Start coding here...\n");
+}
+
+function selectPage(name) {
+  currentPage = name;
+  loadPage();
+  pageModal.style.display = "none";
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  pageModal.style.display = "flex";
+  listPages();
+  newPageName.value = "";
+});
+
+function loadPage() {
+  const wb = JSON.parse(localStorage.getItem(PAGE_PREFIX + currentPage) || "{}");
+  paths = [];
+  if (wb.paths) {
+    for (const obj of wb.paths) {
+      if (obj.tool === 'image' && obj.imageData) {
+        const img = new Image();
+        img.src = obj.imageData;
+        obj.image = img;
+        paths.push(obj);
+      } else {
+        paths.push(obj);
+      }
+    }
+  }
+  if (wb.toolSizes) {
+    Object.assign(toolSizes, wb.toolSizes);
+  }
+  if (window.editor) {
+    window.editor.setValue(localStorage.getItem(CODE_PREFIX + currentPage) || "// Start coding here...\n");
+  }
+  sizePicker.value = toolSizes[toolSelect.value] || 3;
+  redraw();
+}
+
+function autoSave() { savePage(); }
+setInterval(autoSave, 2000);
+window.addEventListener('beforeunload', savePage);
+
+// --- Whiteboard logic ---
+let isDrawing = false;
+let currentPath = null;
+let previewShape = null;
+let paths = [];
+let draggingImage = null;
+let resizingImage = null;
+let dragOffset = null;
+const resizeHandleSize = 12;
+
+function resizeCanvas() {
+  canvas.width = whiteboardDiv.clientWidth;
+  canvas.height = whiteboardDiv.clientHeight;
+  redraw();
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function getPos(evt) {
+  const rect = canvas.getBoundingClientRect();
+  let clientX, clientY;
+  if(evt.touches && evt.touches.length > 0) {
+    clientX = evt.touches[0].clientX;
+    clientY = evt.touches[0].clientY;
+  } else {
+    clientX = evt.clientX;
+    clientY = evt.clientY;
+  }
+  return { x: clientX - rect.left, y: clientY - rect.top };
+}
+
+function drawPath(path) {
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = path.color;
+  ctx.lineWidth = path.size;
+  ctx.globalAlpha = path.tool === 'highlighter' ? 0.3 : 1;
+  ctx.beginPath();
+  const points = path.points;
+  if (points.length === 1) {
+    ctx.moveTo(points[0].x, points[0].y);
+    ctx.lineTo(points[0].x, points[0].y);
+  } else if (points.length === 2) {
+    ctx.moveTo(points[0].x, points[0].y);
+    ctx.lineTo(points[1].x, points[1].y);
+  } else {
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length - 1; i++) {
+      const midX = (points[i].x + points[i + 1].x) / 2;
+      const midY = (points[i].y + points[i + 1].y) / 2;
+      ctx.quadraticCurveTo(points[i].x, points[i].y, midX, midY);
+    }
+    ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function drawShape(shape, isPreview = false) {
+  const x = shape.x;
+  const y = shape.y;
+  let w = shape.w;
+  let h = shape.h;
+  const size = shape.size;
+  const strokeColor = shape.color;
+  const fill = shape.fill;
+  const fillColor = shape.fillColor;
+
+  if(shape.tool === 'square' || shape.tool === 'rounded-square') {
+    const sizeS = Math.min(Math.abs(w), Math.abs(h));
+    w = w < 0 ? -sizeS : sizeS;
+    h = h < 0 ? -sizeS : sizeS;
+  }
+  ctx.lineWidth = size;
+  ctx.strokeStyle = strokeColor;
+
+  ctx.beginPath();
+
+  switch(shape.tool) {
+    case 'rectangle':
+      if(fill){
+        ctx.fillStyle = fillColor;
+        ctx.fillRect(x, y, w, h);
+      }
+      ctx.strokeRect(x, y, w, h);
+      break;
+
+    case 'rounded-rectangle':
+      drawRoundedRect(ctx, x, y, w, h, 15, fill, strokeColor, fillColor);
+      break;
+
+    case 'square':
+      if(fill){
+        ctx.fillStyle = fillColor;
+        ctx.fillRect(x, y, w, h);
+      }
+      ctx.strokeRect(x, y, w, h);
+      break;
+
+    case 'rounded-square':
+      drawRoundedRect(ctx, x, y, w, h, 15, fill, strokeColor, fillColor);
+      break;
+
+    case 'circle': {
+      const r = Math.sqrt(w*w + h*h)/2;
+      const cx = x + w/2;
+      const cy = y + h/2;
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      if(fill){
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+      }
+      ctx.stroke();
+      break;
+    }
+    case 'ellipse': {
+      const cx = x + w/2;
+      const cy = y + h/2;
+      ctx.ellipse(cx, cy, Math.abs(w)/2, Math.abs(h)/2, 0, 0, 2 * Math.PI);
+      if(fill){
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+      }
+      ctx.stroke();
+      break;
+    }
+  }
+}
+
+function drawRoundedRect(ctx, x, y, w, h, radius, fill, strokeColor, fillColor) {
+  const r = radius;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if(fill){
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+  }
+  ctx.strokeStyle = strokeColor;
+  ctx.stroke();
+}
+
+function clearCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function redraw() {
+  clearCanvas();
+  for(const path of paths) {
+    if(path.tool === 'image') {
+      drawImageObject(path);
+    } else if(['pencil','pen','eraser','highlighter'].includes(path.tool)) {
+      if(path.tool === 'eraser') {
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+        drawPath(path);
+        ctx.restore();
+      } else {
+        drawPath(path);
+      }
+    } else {
+      drawShape(path);
+    }
+  }
+  if(previewShape) {
+    ctx.save();
+    ctx.setLineDash([6, 3]);
+    ctx.globalAlpha = 0.7;
+    drawShape(previewShape, true);
+    ctx.restore();
+  }
+  if(resizingImage || draggingImage) {
+    drawImageResizeHandle(resizingImage || draggingImage);
+  } else {
+    const lastImg = getLastImage();
+    if(lastImg) drawImageResizeHandle(lastImg);
+  }
+}
+
+function drawImageObject(img) {
+  if(!img.image) return;
+  ctx.drawImage(img.image, img.x, img.y, img.w, img.h);
+}
+
+function drawImageResizeHandle(img) {
+  if(!img) return;
+  ctx.fillStyle = '#444';
+  ctx.beginPath();
+  ctx.arc(img.x + img.w, img.y + img.h, resizeHandleSize/2, 0, 2 * Math.PI);
+  ctx.fill();
+}
+
+function getLastImage() {
+  for(let i=paths.length-1; i>=0; --i) {
+    if(paths[i].tool === 'image') return paths[i];
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', startDrawing);
+canvas.addEventListener('touchstart', startDrawing, {passive: false});
+canvas.addEventListener('mousemove', drawing);
+canvas.addEventListener('touchmove', drawing, {passive: false});
+canvas.addEventListener('mouseup', endDrawing);
+canvas.addEventListener('touchend', endDrawing);
+canvas.addEventListener('mouseleave', endDrawing);
+
+function startDrawing(evt) {
+  evt.preventDefault();
+  const pos = getPos(evt);
+  const isShift = evt.shiftKey || (evt.touches && evt.touches[0] && evt.touches[0].shiftKey);
+  const lastImg = getLastImage();
+  let overHandle = false, overImage = false;
+  if(lastImg && isShift) {
+    const dx = pos.x - (lastImg.x + lastImg.w);
+    const dy = pos.y - (lastImg.y + lastImg.h);
+    if(dx >= -resizeHandleSize && dx <= resizeHandleSize && dy >= -resizeHandleSize && dy <= resizeHandleSize){
+      resizingImage = lastImg;
+      overHandle = true;
+    } else if(pos.x > lastImg.x && pos.x < lastImg.x + lastImg.w && pos.y > lastImg.y && pos.y < lastImg.y + lastImg.h) {
+      draggingImage = lastImg;
+      dragOffset = { x: pos.x - lastImg.x, y: pos.y - lastImg.y };
+      overImage = true;
+    }
+  }
+  if(!overHandle && !overImage) {
+    isDrawing = true;
+    const tool = toolSelect.value;
+    if(tool === 'eraser' || tool === 'stroke-eraser') {
+      currentPath = {
+        tool,
+        color: 'rgba(0,0,0,1)',
+        size: sizePicker.value,
+        points: [pos]
+      };
+    } else if(tool === 'pencil' || tool === 'pen' || tool === 'highlighter') {
+      currentPath = {
+        tool,
+        color: strokeColorInput.value,
+        size: sizePicker.value,
+        points: [pos]
+      };
+    } else {
+      previewShape = {
+        tool,
+        x: pos.x,
+        y: pos.y,
+        w: 0,
+        h: 0,
+        size: sizePicker.value,
+        color: strokeColorInput.value,
+        fill: fillShapeCheckbox.checked,
+        fillColor: fillColorInput.value
+      };
+    }
+  }
+}
+
+function drawing(evt) {
+  if(evt.cancelable) evt.preventDefault();
+  const pos = getPos(evt);
+  if(resizingImage) {
+    resizingImage.w = Math.max(20, pos.x - resizingImage.x);
+    resizingImage.h = Math.max(20, pos.y - resizingImage.y);
+    redraw();
+    return;
+  }
+  if(draggingImage) {
+    draggingImage.x = pos.x - dragOffset.x;
+    draggingImage.y = pos.y - dragOffset.y;
+    redraw();
+    return;
+  }
+  if(!isDrawing) return;
+  const tool = toolSelect.value;
+  if(tool === 'eraser') {
+    currentPath.points.push(pos);
+    redraw();
+    drawPath(currentPath);
+  } else if(tool === 'stroke-eraser') {
+    eraseStrokesAt(pos);
+    redraw();
+  } else if(tool === 'pencil' || tool === 'pen' || tool === 'highlighter') {
+    currentPath.points.push(pos);
+    redraw();
+    drawPath(currentPath);
+  } else if(previewShape) {
+    previewShape.w = pos.x - previewShape.x;
+    previewShape.h = pos.y - previewShape.y;
+    redraw();
+  }
+}
+
+function endDrawing(evt) {
+  if(evt.cancelable) evt.preventDefault();
+  if(isDrawing && currentPath) {
+    if(currentPath.points.length > 1 || ['pencil','pen','highlighter','eraser'].includes(currentPath.tool)) {
+      paths.push(currentPath);
+    }
+    currentPath = null;
+  }
+  if(previewShape) {
+    if(Math.abs(previewShape.w) > 2 && Math.abs(previewShape.h) > 2) {
+      paths.push(previewShape);
+    }
+    previewShape = null;
+  }
+  isDrawing = false;
+  draggingImage = null;
+  resizingImage = null;
+  dragOffset = null;
+  redraw();
+}
+
+function eraseStrokesAt(pos) {
+  const eraseRadius = sizePicker.value;
+  paths = paths.filter(path => {
+    if(path.tool === 'image') return true;
+    if(path.points) {
+      for(const p of path.points){
+        const dx = p.x - pos.x;
+        const dy = p.y - pos.y;
+        if(dx*dx + dy*dy <= eraseRadius*eraseRadius) {
+          return false;
+        }
+      }
+    }
+    return true;
+  });
+}
+
+clearCanvasBtn.addEventListener('click', () => {
+  paths = [];
+  draggingImage = null;
+  resizingImage = null;
+  redraw();
+});
+
+saveCanvasBtn.addEventListener('click', () => {
+  redraw();
+  const link = document.createElement('a');
+  link.download = 'whiteboard.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+});
+
+btnEditor.addEventListener('click', () => {
+  btnEditor.classList.add('active');
+  btnWhiteboard.classList.remove('active');
+  editorDiv.classList.add('active');
+  whiteboardDiv.classList.remove('active');
+});
+btnWhiteboard.addEventListener('click', () => {
+  btnWhiteboard.classList.add('active');
+  btnEditor.classList.remove('active');
+  whiteboardDiv.classList.add('active');
+  editorDiv.classList.remove('active');
+  if(window.editor) {
+    window.editor.layout();
+  }
+});
+
+toggleThemeBtn.addEventListener('click', () => {
+  const current = document.body.getAttribute('data-theme');
+  if(current === 'light') {
+    document.body.setAttribute('data-theme', 'dark');
+    toggleThemeBtn.textContent = '☀️';
+    if(window.editor) monaco.editor.setTheme('vs-dark');
+  } else {
+    document.body.setAttribute('data-theme', 'light');
+    toggleThemeBtn.textContent = '🌙';
+    if(window.editor) monaco.editor.setTheme('vs');
+  }
+});
+
+imgUpload.addEventListener('change', (e) => {
+  if(e.target.files && e.target.files[0]) {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      const img = new Image();
+      img.onload = function() {
+        const maxWidth = canvas.width / 2;
+        const maxHeight = canvas.height / 2;
+        let w = img.width;
+        let h = img.height;
+        if(w > maxWidth) {
+          h = h * (maxWidth / w);
+          w = maxWidth;
+        }
+        if(h > maxHeight) {
+          w = w * (maxHeight / h);
+          h = maxHeight;
+        }
+        const imgObj = {
+          tool: 'image',
+          image: img,
+          x: (canvas.width - w) / 2,
+          y: (canvas.height - h) / 2,
+          w: w,
+          h: h
+        };
+        paths.push(imgObj);
+        redraw();
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+  imgUpload.value = '';
+});
+
+// --- Embed webpage logic ---
+embedCFBtn.addEventListener('click', () => {
+  const url = cfLink.value.trim();
+  if (!/^https?:\/\//i.test(url)) {
+    alert('Please enter a valid URL starting with http:// or https://');
+    return;
+  }
+  cfIframe.style.display = '';
+  const err = document.getElementById('cf-embed-error');
+  if (err) err.remove();
+  cfIframe.src = url;
+  cfEmbedContainer.style.display = 'block';
+  cfIframe.onload = null;
+  cfIframe.onerror = null;
+});
+closeCFEmbed.addEventListener('click', () => {
+  cfEmbedContainer.style.display = 'none';
+  cfIframe.src = '';
+  cfIframe.style.display = '';
+  const err = document.getElementById('cf-embed-error');
+  if (err) err.remove();
+});
+
+// --- Save on every change ---
+function afterWhiteboardChange() { savePage(); }
+function afterCodeChange() { savePage(); }
+if (window.editor) window.editor.onDidChangeModelContent(afterCodeChange);
+const origRedraw = redraw;
+redraw = function() { origRedraw(); savePage(); };
+require(["vs/editor/editor.main"], function () {
+  if (window.editor) {
+    window.editor.onDidChangeModelContent(afterCodeChange);
+  }
+});
+
+
+pageModal.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    createPageBtn.click();
+  }
+});
+
+// --- Webcam logic ---
+webcamBtn.addEventListener('click', async () => {
+  // Only show webcam panel when button is clicked
+  webcamPanel.style.display = 'flex';
+  document.querySelector('.content').style.width = '65vw';
+  document.querySelector('.content').style.transition = 'width 0.3s';
+
+  try {
+    // Stop previous stream if any
+    if (webcamStream) {
+      webcamStream.getTracks().forEach(track => track.stop());
+      webcamStream = null;
+    }
+    // Request webcam
+    webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    webcamVideo.srcObject = webcamStream;
+    webcamVideo.play();
+  } catch (err) {
+    alert('Could not access webcam: ' + err.message);
+    webcamPanel.style.display = 'none';
+    document.querySelector('.content').style.width = '';
+  }
+});
+
+closeWebcamBtn.addEventListener('click', () => {
+  webcamPanel.style.display = 'none';
+  document.querySelector('.content').style.width = '';
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(track => track.stop());
+    webcamStream = null;
+    webcamVideo.srcObject = null;
+  }
+});
+</script>
+</body>
+</html>
+
+

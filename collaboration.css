@@ -1,0 +1,18 @@
+#auth-overlay { position:fixed; inset:0; z-index:10000; display:flex; align-items:center; justify-content:center; background:#0f172af5; color:#172033; }
+#auth-card { box-sizing:border-box; width:min(420px,92vw); background:white; padding:32px; border-radius:16px; box-shadow:0 20px 80px #0008; }
+#auth-card h1 { font-size:25px; margin-top:0; }
+#auth-card label { display:block; margin:20px 0 8px; font-weight:600; }
+#auth-card input { box-sizing:border-box; width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:7px; font-size:16px; }
+#auth-card button { width:100%; margin-top:18px; padding:12px; border:0; border-radius:7px; background:#2563eb; color:white; font-size:16px; cursor:pointer; }
+#auth-card button:disabled { opacity:.5; }
+#auth-error { color:#b91c1c; min-height:20px; margin:12px 0 0; }
+#auth-card small { display:block; color:#64748b; margin-top:8px; line-height:1.5; }
+#collaboration-status { font-size:12px; margin-right:10px; max-width:220px; }
+#participants { display:flex; gap:5px; max-width:220px; overflow:auto; }
+.participant { white-space:nowrap; border-bottom:3px solid var(--user-color); padding:4px; font-size:12px; }
+#cursor-layer { position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:30; }
+.remote-cursor { position:absolute; top:0; left:0; color:var(--user-color); }
+.remote-cursor svg { width:20px; height:25px; display:block; filter:drop-shadow(0 1px 1px #fff); }
+.remote-cursor span { display:block; margin-left:14px; padding:3px 7px; background:var(--user-color); color:white; border-radius:4px; font-size:12px; white-space:nowrap; }
+#canvas { touch-action:none; }
+@media(max-width:700px) { #participants { max-width:100px; } .top-bar button { padding:.5rem; margin-right:2px; } #collaboration-status { max-width:85px; } }

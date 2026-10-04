@@ -1,3 +1,4 @@
+HEAD
 # Collaborative whiteboard
 
 Run `npm install`, then `npm start`, and open http://localhost:3000. Share the server URL with trusted people; all clients must reach the same server. Node.js 22 or later is required.
@@ -17,3 +18,6 @@ For internet hosting, deploy this server on a host supporting long-running Node.
 Run `npm test` for integration checks covering authentication, authorization, shared drawings, code conflicts, cursor messages and capacity.
 
 For step-by-step live hosting instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
+# WHITEBOARD
+bd5719bfb132d7665e47105791edd9b3bb44cd2b

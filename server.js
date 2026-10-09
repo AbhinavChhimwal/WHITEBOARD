@@ -3,6 +3,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from '
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
+import { DEFAULT_CODE } from './compiler-editor.js';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 if (existsSync(root + '.env')) {
@@ -20,6 +21,7 @@ const colors = ['#e63946', '#2563eb', '#16a34a', '#9333ea', '#ea580c', '#0891b2'
 const sessions = new Map();
 const attempts = new Map();
 const peers = new Map();
+const executions = new Map();
 const dataDirectory = process.env.DATA_DIR || root + 'data';
 mkdirSync(dataDirectory, { recursive: true });
 const storage = dataDirectory + '/pages.json';
@@ -79,7 +81,7 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Set-Cookie', 'wb_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
     return json(200, { ok: true });
   }
-  const files = { '/': 'index.html', '/index.html': 'index.html', '/collaboration.js': 'collaboration.js', '/collaboration.css': 'collaboration.css' };
+  const files = { '/': 'index.html', '/index.html': 'index.html', '/collaboration.js': 'collaboration.js', '/collaboration.css': 'collaboration.css', '/api-client.js': 'api-client.js', '/compiler-editor.js': 'compiler-editor.js' };
   if (req.method === 'GET' && files[req.url]) {
     res.setHeader('Content-Type', req.url.endsWith('.js') ? 'text/javascript' : req.url.endsWith('.css') ? 'text/css' : 'text/html');
     return res.end(readFileSync(root + files[req.url]));
@@ -122,13 +124,13 @@ wss.on('connection', (ws, session) => {
         if (typeof m.name !== 'string' || !m.name.trim() || m.name.length > 80 || pages.has(m.name) || pages.size >= 100) throw Error('Page exists or page limit reached.');
         const paths = m.paths || [];
         if (!Array.isArray(paths) || paths.length > 10000 || !paths.every(validPath)) throw Error('Invalid page contents.');
-        pages.set(m.name, { paths, code: typeof m.code === 'string' ? m.code.slice(0, 1000000) : '// Start coding here...\n', language: 'javascript', revision: 0, embedUrl: null });
+        pages.set(m.name, { paths, code: typeof m.code === 'string' ? m.code.slice(0, 1000000) : DEFAULT_CODE, language: ['javascript','c','cpp','java'].includes(m.language) ? m.language : typeof m.code === 'string' ? 'javascript' : 'cpp', stdin:typeof m.stdin === 'string' ? m.stdin.slice(0,64000) : '', revision: 0, embedUrl: null });
         persist(); broadcast({ type: 'pages', pages: [...pages.keys()] });
         send(ws, { type: 'created', name: m.name, select: m.select });
       } else if (m.type === 'join' && pages.has(m.name)) {
-        user.page = m.name; send(ws, { type: 'state', name: m.name, page: pages.get(m.name) }); presence();
+        user.page = m.name; send(ws, { type: 'state', name: m.name, page: pages.get(m.name), execution:executions.get(m.name) || null }); presence();
       } else if (m.type === 'delete' && pages.has(m.name)) {
-        pages.delete(m.name); persist(); broadcast({ type: 'deleted', name: m.name }); broadcast({ type: 'pages', pages: [...pages.keys()] });
+        pages.delete(m.name); executions.delete(m.name); persist(); broadcast({ type: 'deleted', name: m.name }); broadcast({ type: 'pages', pages: [...pages.keys()] });
       } else if (m.type === 'patch' && m.name === user.page && pages.has(m.name)) {
         const page = pages.get(m.name);
         if (!Array.isArray(m.upsert) || !Array.isArray(m.remove) || m.upsert.length > 10000 || !m.upsert.every(validPath) || !m.remove.every(id => typeof id === 'string')) throw Error('Invalid drawing. Images must be PNG, JPEG, GIF, WebP or BMP under 6 MB.');
@@ -142,8 +144,27 @@ wss.on('connection', (ws, session) => {
         const page = pages.get(m.name);
         if (m.revision !== page.revision) return send(ws, { type: 'code-conflict', name: m.name, page });
         if (typeof m.code !== 'string' || m.code.length > 1000000 || !['javascript', 'c', 'cpp', 'java'].includes(m.language)) throw Error('Invalid code.');
-        page.code = m.code; page.language = m.language; page.revision++; persist();
-        broadcast({ type: 'code', name: m.name, code: page.code, language: page.language, revision: page.revision, sender: user.id });
+        if (m.stdin !== undefined && (typeof m.stdin !== 'string' || m.stdin.length > 64000)) throw Error('Invalid standard input.');
+        page.code = m.code; page.stdin = m.stdin ?? page.stdin ?? ''; page.language = m.language; page.revision++; persist();
+        broadcast({ type: 'code', name: m.name, code: page.code, stdin:page.stdin, language: page.language, revision: page.revision, sender: user.id });
+      } else if (m.type === 'execution-start' && m.name === user.page && pages.has(m.name)) {
+        if (m.revision !== pages.get(m.name).revision) throw Error('Code changed. Wait for it to sync before running.');
+        const previous = executions.get(m.name);
+        if (previous?.status === 'running' && Date.now() - previous.started < 95000) throw Error('Someone is already running this page. Wait for the result.');
+        const execution = {id:randomUUID(),sender:user.id,runner:user.name,revision:m.revision,status:'running',started:Date.now(),result:null};
+        executions.set(m.name,execution); broadcast({type:'execution',name:m.name,execution});
+      } else if (m.type === 'execution-result' && m.name === user.page && pages.has(m.name)) {
+        const execution = executions.get(m.name);
+        if (!execution || execution.id !== m.id || execution.sender !== user.id || execution.status !== 'running') return;
+        if (!m.result || typeof m.result !== 'object' || Array.isArray(m.result)) throw Error('Invalid execution result.');
+        const result = {};
+        for (const key of ['stdout','stderr','exception']) {
+          if (m.result[key] !== undefined && typeof m.result[key] !== 'string') throw Error('Invalid execution output.');
+          result[key] = (m.result[key] || '').slice(0,100000);
+        }
+        result.executionTime = Number.isFinite(m.result.executionTime) ? m.result.executionTime : 0;
+        execution.result = result; execution.status = result.exception || result.stderr ? 'finished with errors' : 'finished';
+        broadcast({type:'execution',name:m.name,execution});
       } else if (m.type === 'embed' && m.name === user.page && pages.has(m.name)) {
         let url = null;
         if (m.url !== null) {
@@ -165,9 +186,18 @@ wss.on('connection', (ws, session) => {
     } catch (error) { send(ws, { type: 'error', message: error.message || 'Invalid request.' }); }
   });
   ws.on('error', () => {});
-  ws.on('close', () => { peers.delete(ws); presence(); });
+  ws.on('close', () => {
+    peers.delete(ws);
+    for (const [name,execution] of executions) if (execution.sender === user.id && execution.status === 'running') {
+      execution.status = 'interrupted'; execution.result = {exception:'The person running the code disconnected.'}; broadcast({type:'execution',name,execution});
+    }
+    presence();
+  });
 });
 const heartbeat = setInterval(() => {
+  for (const [name,execution] of executions) if (execution.status === 'running' && Date.now() - execution.started > 95000) {
+    execution.status = 'timed out'; execution.result = {exception:'Execution timed out. Run again to retry.'}; broadcast({type:'execution',name,execution});
+  }
   for (const [ws, user] of peers) {
     if (!ws.alive || ![...sessions.values()].some(s => s.id === user.id && s.expires > Date.now())) { ws.terminate(); continue; }
     ws.alive = false; ws.ping();

@@ -11,6 +11,8 @@ Pages, strokes, erasers, shapes, image movement/resizing, deletions, code, langu
 
 Code updates synchronize with revision checks. If simultaneous code edits conflict, the rejected local text downloads as `whiteboard-code-recovery.txt`, and the editor receives the server version. This is not character-level collaborative code editing.
 
+The coding view uses OneCompiler's embedded editor, with its documented code-change and populate-code messages connected to our sockets. C, C++, Java and JavaScript can be compiled/run through **Run code**. Code and standard input sync with the selected page. One participant runs the code once; output, errors, runner name and code revision appear in a shared results panel for everyone on that page. The latest result is available to later arrivals during this server session. Only messages from the actual OneCompiler iframe and its exact origin are accepted. New pages start with a runnable C++ example; existing pages retain their code and language. Compilation requires internet access and OneCompiler availability; it does not run untrusted code on our Node server. [Provider documentation](https://onecompiler.com/apis/embed-editor).
+
 Shared pages persist in `data/pages.json`; back up this directory. Existing browser-local pages can be imported through **Import saved pages** in the page picker. They are not uploaded automatically. A disconnected client must sign in again; the server restores its saved state.
 
 For internet hosting, deploy this server on a host supporting long-running Node.js processes and WebSocket upgrades, with persistent storage and HTTPS. Set `PUBLIC_ORIGIN=https://your-domain.example` in the environment so origin checks match and session cookies use Secure. Static-only hosting of `index.html` cannot run the socket server. Use a single server instance to enforce the global ten-person limit. Never publish `.env` or `data/`.
@@ -18,6 +20,8 @@ For internet hosting, deploy this server on a host supporting long-running Node.
 Run `npm test` for integration checks covering authentication, authorization, shared drawings, code conflicts, cursor messages and capacity.
 
 For step-by-step live hosting instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
+For the requested free Vercel demonstration, see [VERCEL-DEMO.md](VERCEL-DEMO.md). It describes the necessary backend adapter, temporary shared state and reconnect behavior; those serverless changes are not implemented yet. Existing local runtime and storage remain intact.
 
 # WHITEBOARD
 bd5719bfb132d7665e47105791edd9b3bb44cd2b

@@ -1,8 +1,11 @@
 // Shared pages and embed URLs are authoritative on the server. Theme and webcam remain personal.
 let socket, me, sharedPages = [], applyingRemote = false, connected = false;
 let attemptedLogin = false;
+let queuedRun = false;
+let sharedExecution = null;
+let executionSupported = false;
 let baseline = new Map(), codeRevision = 0, codeInFlight = false, codeDirty = false;
-let sharedCode = '// Start coding here...\n', sharedLanguage = 'javascript', boardTimer, codeTimer;
+let sharedCode = null, sharedInput = '', sharedLanguage = 'cpp', boardTimer, codeTimer;
 const cursors = new Map();
 const remotePreviews = new Map();
 const drawSharedBoard = redraw;
@@ -15,7 +18,7 @@ redraw = function() {
 };
 const authOverlay = document.createElement('div');
 authOverlay.id = 'auth-overlay';
-authOverlay.innerHTML = `<form id="auth-card"><h1>Join the whiteboard</h1><p>A private workspace for up to 10 people.</p><section id="name-step"><label for="join-name">Your name</label><input id="join-name" maxlength="40" autocomplete="name" placeholder="Enter your name (optional)"><small>Leave this blank to receive a Guest alias.</small><button type="button" id="name-next">Continue</button></section><section id="password-step" hidden><label for="join-password">Workspace password</label><input id="join-password" type="password" autocomplete="current-password" required disabled><button id="join-submit">Join workspace</button><button type="button" id="name-back">Change name</button></section><p id="auth-error" role="alert"></p></form>`;
+authOverlay.innerHTML = `<form id="auth-card" aria-labelledby="auth-heading"><div class="auth-brand"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8" fill="#2d513f"/><path d="M10 21l3-10 4 10 3-10" stroke="#e8efdf" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Whiteboard</span></div><p class="auth-eyebrow">A SPACE TO THINK TOGETHER</p><h1 id="auth-heading">Good ideas start<br>with a blank page.</h1><p class="auth-description">Come in, sketch something, and make it better together.</p><div class="auth-steps" aria-label="Sign-in progress"><span class="auth-step active" id="auth-name-progress"><b>01</b> Your name</span><span class="auth-step" id="auth-password-progress"><b>02</b> Workspace access</span></div><section id="name-step"><label for="join-name">What should we call you?</label><input id="join-name" maxlength="40" autocomplete="name" placeholder="Your name" aria-describedby="name-help"><small id="name-help">Just visiting? Leave this blank for a guest alias.</small><button type="button" id="name-next">Continue <span aria-hidden="true">→</span></button></section><section id="password-step" hidden><label for="join-password">Workspace password</label><input id="join-password" type="password" autocomplete="current-password" placeholder="Enter the shared password" required disabled aria-describedby="password-help"><small id="password-help">Use the password shared by your host.</small><button id="join-submit">Join workspace <span aria-hidden="true">→</span></button><button type="button" id="name-back">← Back to your name</button></section><p id="auth-error" role="alert"></p><div class="auth-footer"><span><i aria-hidden="true"></i> A private workspace</span><span>Room for 10 people</span></div></form>`;
 document.body.append(authOverlay);
 const status = document.createElement('span'); status.id = 'collaboration-status'; status.setAttribute('role', 'status');
 const participants = document.createElement('div'); participants.id = 'participants';
@@ -54,6 +57,8 @@ function passwordStep(show) {
   document.getElementById('name-step').hidden = show;
   document.getElementById('password-step').hidden = !show;
   document.getElementById('join-password').disabled = !show;
+  document.getElementById('auth-name-progress').classList.toggle('active', !show);
+  document.getElementById('auth-password-progress').classList.toggle('active', show);
   document.getElementById(show ? 'join-password' : 'join-name').focus();
 }
 document.getElementById('name-next').onclick = () => passwordStep(true);
@@ -64,8 +69,8 @@ document.getElementById('auth-card').onsubmit = async e => {
   const submit = document.getElementById('join-submit'); submit.disabled = true; authError.textContent = '';
   try {
     const response = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:document.getElementById('join-name').value,password:document.getElementById('join-password').value}) });
-    const result = await response.json();
-    if (!response.ok) throw Error(result.error);
+    const { readApiResponse } = await import('/api-client.js');
+    await readApiResponse(response);
     document.getElementById('join-password').value = '';
     attemptedLogin = true;
     connect();
@@ -95,7 +100,7 @@ function syncBoard() {
   baseline = next;
 }
 savePage = function () { if (!applyingRemote) { clearTimeout(boardTimer); boardTimer = setTimeout(syncBoard, 40); } };
-savePageAs = function(name, objects, sizes, code) { emit({type:'create',name:name.trim(),paths:objects.map(serialize),code,select:false}); };
+savePageAs = function(name, objects, sizes, code) { emit({type:'create',name:name.trim(),paths:objects.map(serialize),code,language:langSelect.value,stdin:window.editor?.getInput() ?? sharedInput,select:false}); };
 listPages = function() {
   pageListDiv.replaceChildren();
   if (!sharedPages.length) { const empty = document.createElement('p'); empty.textContent = 'No shared pages yet. Create one to start.'; pageListDiv.append(empty); }
@@ -118,32 +123,51 @@ importButton.onclick = () => {
       const name = key.slice(PAGE_PREFIX.length);
       if (sharedPages.includes(name)) continue;
       const saved = JSON.parse(localStorage.getItem(key));
-      emit({type:'create',name,paths:(saved.paths || []).filter(p => p.tool !== 'stroke-eraser').map(serialize),code:localStorage.getItem(CODE_PREFIX + name) || '// Start coding here...\n',select:false});
+      emit({type:'create',name,paths:(saved.paths || []).filter(p => p.tool !== 'stroke-eraser').map(serialize),code:localStorage.getItem(CODE_PREFIX + name) ?? '// Start coding here...\n',language:saved.language || 'javascript',select:false});
       imported++;
     }
     status.textContent = imported ? `Importing ${imported} saved pages…` : 'No new saved pages to import.';
   } catch { status.textContent = 'A saved page could not be imported.'; }
 };
 createPageBtn.onclick = () => { const name = newPageName.value.trim(); if (name) emit({type:'create',name,paths:[],select:true}); };
-addToListBtn.onclick = () => { const name = prompt('Enter a name for the new shared page:'); if (name?.trim()) savePageAs(name, paths, toolSizes, window.editor?.getValue() || sharedCode); };
+addToListBtn.onclick = () => { const name = prompt('Enter a name for the new shared page:'); if (name?.trim()) savePageAs(name, paths, toolSizes, window.editor?.getValue() ?? sharedCode ?? ''); };
 loadPage = function() { if (currentPage) emit({type:'join',name:currentPage}); };
 afterCodeChange = function() { if (!applyingRemote && currentPage) { codeDirty = true; clearTimeout(codeTimer); codeTimer = setTimeout(sendCode, 200); } };
-// The existing listener holds the old function reference; add a collaborative listener when Monaco is ready.
-require(['vs/editor/editor.main'], () => {
+function connectCodeEditor() {
   if (!window.editor) return;
-  applyingRemote = true; window.editor.setValue(sharedCode); monaco.editor.setModelLanguage(window.editor.getModel(), sharedLanguage); applyingRemote = false;
+  applyingRemote = true;
+  if (sharedCode !== null) window.editor.setState({code:sharedCode,stdin:sharedInput,language:sharedLanguage});
+  if (currentPage && connected) window.editor.activate(currentPage);
+  applyingRemote = false;
   window.editor.onDidChangeModelContent(afterCodeChange);
-});
+  window.editor.onRun(() => {
+    if (!connected || !currentPage) { status.textContent = 'Join a shared page before running code.'; return; }
+    if (!executionSupported) {
+      window.editor.showRunError('This backend is outdated. Restart npm start, then refresh this page. The current local version is at http://localhost:3001/.');
+      return;
+    }
+    window.editor.showRunPending(); queuedRun = true; sendCode(); requestExecution();
+  });
+  window.editor.onRunResult((id,result) => emit({type:'execution-result',name:currentPage,id,result}));
+  window.editor.showExecution(sharedExecution);
+}
+function requestExecution() {
+  if (!queuedRun || codeDirty || codeInFlight || !connected || !currentPage) return;
+  queuedRun = false;
+  emit({type:'execution-start',name:currentPage,revision:codeRevision});
+}
+window.addEventListener('code-editor-ready',connectCodeEditor,{once:true});
+if (window.editor) connectCodeEditor();
 function sendCode() {
   if (!connected || !currentPage || applyingRemote || codeInFlight || !codeDirty) return;
   codeDirty = false; codeInFlight = true;
-  emit({type:'code',name:currentPage,code:window.editor?.getValue() || sharedCode,language:langSelect.value,revision:codeRevision});
+  emit({type:'code',name:currentPage,code:window.editor?.getValue() ?? sharedCode ?? '',stdin:window.editor?.getInput() ?? sharedInput,language:langSelect.value,revision:codeRevision});
 }
 langSelect.addEventListener('change', afterCodeChange);
 function applyCode(page) {
-  sharedCode = page.code; sharedLanguage = page.language; codeRevision = page.revision;
+  sharedCode = page.code; sharedInput = page.stdin || ''; sharedLanguage = page.language; codeRevision = page.revision;
   langSelect.value = page.language;
-  if (window.editor) { const position = window.editor.getPosition(); if (window.editor.getValue() !== page.code) window.editor.setValue(page.code); monaco.editor.setModelLanguage(window.editor.getModel(), page.language); if (position) window.editor.setPosition(position); }
+  if (window.editor) window.editor.setState({code:sharedCode,stdin:sharedInput,language:sharedLanguage});
 }
 function connect() {
   socket?.close();
@@ -161,9 +185,13 @@ function connect() {
       } else if (message.type === 'pages') { sharedPages = message.pages; listPages(); }
       else if (message.type === 'created') { newPageName.value = ''; if (message.select) selectPage(message.name); }
       else if (message.type === 'state') {
+        queuedRun = false;
+        executionSupported = Object.hasOwn(message,'execution');
         currentPage = message.name; paths = message.page.paths.map(hydrate); resetBaseline(); isDrawing = false; currentPath = previewShape = draggingImage = resizingImage = null;
         codeInFlight = codeDirty = false; applyCode(message.page); pageModal.style.display = 'none'; redraw(); clearCursors();
         applyEmbed(message.page.embedUrl);
+        window.editor?.activate(message.name);
+        sharedExecution = message.execution || null; window.editor?.showExecution(sharedExecution);
       } else if (message.type === 'patch' && message.name === currentPage && message.sender !== me.id) {
         syncBoardBeforeRemote();
         const objects = new Map(paths.map(p => [p.id,p]));
@@ -172,15 +200,20 @@ function connect() {
         paths = [...objects.values()]; redraw();
       } else if (message.type === 'code' && message.name === currentPage) {
         codeRevision = message.revision;
-        if (message.sender === me.id) { codeInFlight = false; sharedCode = message.code; sharedLanguage = message.language; }
+        if (message.sender === me.id) { codeInFlight = false; sharedCode = message.code; sharedInput = message.stdin || ''; sharedLanguage = message.language; }
         else if (!codeInFlight && !codeDirty) applyCode(message);
       } else if (message.type === 'code-conflict' && message.name === currentPage) {
+        queuedRun = false;
         // Preserve a rejected edit as a downloadable recovery file before accepting authoritative text.
-        const blob = new Blob([window.editor?.getValue() || sharedCode], {type:'text/plain'});
+        const blob = new Blob([window.editor?.getValue() ?? sharedCode ?? ''], {type:'text/plain'});
         const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = 'whiteboard-code-recovery.txt'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
         codeInFlight = codeDirty = false; applyCode(message.page); status.textContent = 'Code conflict: your edit was saved in a recovery file.';
+      } else if (message.type === 'execution' && message.name === currentPage) {
+        sharedExecution = message.execution; window.editor?.showExecution(sharedExecution);
+        if (message.execution.status === 'running' && message.execution.sender === me.id) window.editor?.executeRun(message.execution.id);
       } else if (message.type === 'deleted' && message.name === currentPage) {
         currentPage = null; paths = []; baseline.clear(); redraw(); pageModal.style.display = 'flex'; clearCursors(); applyEmbed(null);
+        window.editor?.reset();
       } else if (message.type === 'embed' && message.name === currentPage) {
         applyEmbed(message.url);
       } else if (message.type === 'presence') renderPresence(message.users);
@@ -189,13 +222,15 @@ function connect() {
         if (message.path) remotePreviews.set(message.user,message.path); else remotePreviews.delete(message.user);
         redraw();
       }
-      else if (message.type === 'error') { status.textContent = message.message; if (currentPage) loadPage(); }
+      else if (message.type === 'error') { queuedRun = false; status.textContent = message.message; window.editor?.showRunError(message.message); if (currentPage) loadPage(); }
     } finally { applyingRemote = false; }
     if (codeDirty && !codeInFlight) sendCode();
+    requestExecution();
   };
   ws.onclose = () => {
     if (socket !== ws) return;
     connected = false; codeInFlight = false; clearCursors(); applyEmbed(null); participants.replaceChildren(); logout.hidden = true;
+    window.editor?.reset();
     authOverlay.style.display = 'flex'; status.textContent = 'Disconnected';
     authError.textContent = attemptedLogin ? 'Connection closed. Sign in to retry. The workspace may be full (10 people), or this session is already open in another tab.' : '';
   };

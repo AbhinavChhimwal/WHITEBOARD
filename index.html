@@ -212,7 +212,6 @@
     }
   </style>
   <link rel="stylesheet" href="/collaboration.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
 </head>
 
 <body data-theme="light">
@@ -223,7 +222,7 @@
     <select id="lang-select">
       <option value="javascript">JavaScript</option>
       <option value="c">C</option>
-      <option value="cpp">C++</option>
+      <option value="cpp" selected>C++</option>
       <option value="java">Java</option>
     </select>
     <div class="right">
@@ -232,7 +231,13 @@
   </div>
 
   <div class="content">
-    <div id="editor" class="active"></div>
+    <div id="editor" class="active">
+      <div class="compiler-toolbar"><span id="compiler-status" role="status">Choose a shared page to start coding.</span><div><button id="reload-compiler" type="button" hidden>Reload editor</button><button id="run-code" type="button" disabled>▶ Run code</button></div></div>
+      <figure id="compiler-editor-figure">
+        <iframe id="compiler-frame" title="Collaborative code editor and compiler" width="100%" height="480" referrerpolicy="no-referrer"></iframe>
+        <figcaption>Powered by <a href="https://onecompiler.com/apis/embed-editor" target="_blank" rel="noopener">OneCompiler</a></figcaption>
+      </figure>
+    </div>
     <div id="whiteboard">
       <div id="whiteboard-tools">
         <select id="tool">
@@ -292,25 +297,13 @@
   </div>
 
   <script>
-    // Monaco Editor Initialization
-    window.editor = null; // Avoid the DOM's named #editor property before Monaco is ready.
-    require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' } });
-    require(["vs/editor/editor.main"], function () {
-      const initialLang = document.getElementById('lang-select').value || 'javascript';
-      window.editor = monaco.editor.create(document.getElementById('editor'), {
-        value: "// Start coding here...\n",
-        language: initialLang,
-        theme: document.body.getAttribute('data-theme') === 'dark' ? 'vs-dark' : 'vs',
-        automaticLayout: true,
-        fontSize: 16,
-      });
-      if (currentPage) {
-        const wb = JSON.parse(localStorage.getItem(PAGE_PREFIX + currentPage) || "{}");
-        const lang = wb.language || "javascript";
-        document.getElementById('lang-select').value = lang;
-        window.editor.setValue(localStorage.getItem(CODE_PREFIX + currentPage) || "// Start coding here...\n");
-        monaco.editor.setModelLanguage(window.editor.getModel(), lang);
-      }
+    // OneCompiler runs code and reports edits through its documented iframe API.
+    window.editor = null;
+    import('/compiler-editor.js').then(({ createCompilerEditor }) => {
+      window.editor = createCompilerEditor();
+      window.dispatchEvent(new Event('code-editor-ready'));
+    }).catch(() => {
+      document.getElementById('compiler-status').textContent = 'The coding view could not load. Refresh after deploying all project files.';
     });
 
     // DOM references
@@ -507,7 +500,7 @@
       document.getElementById('lang-select').value = lang;
       if (window.editor) {
         window.editor.setValue(localStorage.getItem(CODE_PREFIX + currentPage) || "// Start coding here...\n");
-        monaco.editor.setModelLanguage(window.editor.getModel(), lang);
+        window.editor.setLanguage(lang);
       }
       sizePicker.value = toolSizes[toolSelect.value] || 3;
       redraw();
@@ -898,11 +891,11 @@
       if (current === 'light') {
         document.body.setAttribute('data-theme', 'dark');
         toggleThemeBtn.textContent = '☀️';
-        if (window.editor) monaco.editor.setTheme('vs-dark');
+        if (window.editor) window.editor.setTheme('dark');
       } else {
         document.body.setAttribute('data-theme', 'light');
         toggleThemeBtn.textContent = '🌙';
-        if (window.editor) monaco.editor.setTheme('vs');
+        if (window.editor) window.editor.setTheme('light');
       }
     });
 
@@ -971,14 +964,6 @@
     function afterCodeChange() { savePage(); }
     const origRedraw = redraw;
     redraw = function () { origRedraw(); savePage(); };
-    require(["vs/editor/editor.main"], function () {
-      if (window.editor &&
-        typeof window.editor.onDidChangeModelContent === "function") {
-
-        window.editor.onDidChangeModelContent(afterCodeChange);
-      }
-
-    });
 
 
     pageModal.addEventListener('keydown', (e) => {
@@ -1044,13 +1029,12 @@
     const langSelect = document.getElementById('lang-select');
     langSelect.addEventListener('change', (e) => {
       if (window.editor) {
-        const model = window.editor.getModel();
-        monaco.editor.setModelLanguage(model, e.target.value);
+        window.editor.setLanguage(e.target.value);
       }
       savePage();
     });
 
-    // --- Dynamic Resizing of Canvas and Monaco Editor ---
+    // --- Dynamic Resizing of Canvas and Coding View ---
     const contentDiv = document.querySelector('.content');
     const contentResizeObserver = new ResizeObserver(() => {
       resizeCanvas();

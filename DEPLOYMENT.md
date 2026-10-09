@@ -4,7 +4,7 @@ This app needs a running Node.js server, WebSockets, HTTPS, and persistent stora
 
 ## 1. Put the project on GitHub
 
-Create a private GitHub repository and upload the project files: `index.html`, `collaboration.js`, `collaboration.css`, `server.js`, `package.json`, `package-lock.json`, `.gitignore`, `.env.example`, documentation and tests. You can use GitHub's upload-files interface or Git. Do not upload `.env`, `node_modules`, `.vercel` or `data`. The included `.gitignore` excludes them when using Git; manual uploads must omit them too.
+Create a private GitHub repository and upload the project files: `index.html`, `collaboration.js`, `collaboration.css`, `api-client.js`, `compiler-editor.js`, `server.js`, `package.json`, `package-lock.json`, `.gitignore`, `.env.example`, documentation and tests. You can use GitHub's upload-files interface or Git. Do not upload `.env`, `node_modules`, `.vercel` or `data`. The included `.gitignore` excludes them when using Git; manual uploads must omit them too.
 
 ## 2. Create a web service
 
@@ -55,6 +55,7 @@ To change access, update `WHITEBOARD_PASSWORD` and redeploy/restart. All existin
 
 ## Troubleshooting
 
+- **JSON.parse / login API returned a webpage:** The browser expected JSON from `/api/login`, but received HTML or a hosting error instead. Open `/health` on the same domain: it should return `{"ok":true}`. A webpage or 404 usually means you deployed a static frontend rather than the Node Web Service; a 502/503 means the backend is unavailable. Check the service type, `npm start`, environment variables and deployment logs. Locally, use `npm start` and `http://localhost:3000`, rather than opening `index.html` or using a static preview server. Deploy all project files, including `api-client.js`.
 - **Untrusted origin / cannot sign in:** Check that `PUBLIC_ORIGIN`, if set, exactly matches the HTTPS address in the browser, without a trailing slash. Remove it when using only the default Render URL.
 - **Pages lost after deploy:** Check that the persistent disk is attached and `DATA_DIR=/var/data/whiteboard` is set.
 - **Workspace full:** Ten live connections are already present, or that browser session is open in another tab. Leave one session or use a separate browser profile for another person.
@@ -62,3 +63,13 @@ To change access, update `WHITEBOARD_PASSWORD` and redeploy/restart. All existin
 - **Socket disconnects during a deployment:** Sign in again after deployment finishes. Render closes connections when an instance is replaced. [WebSocket lifecycle](https://render.com/docs/websocket).
 
 Official setup reference: [Deploy a Node app](https://render.com/docs/deploy-node-express-app).
+
+## If you already deployed this repository to Vercel
+
+The current repository has a standalone `server.js` process and no Vercel Function entrypoint or route configuration for `/api/login` and `/socket`. Deploying its static frontend alone does not start the backend. A sign-in request may receive an HTML error/fallback page, which previously appeared as `JSON.parse: unexpected character` in the browser. The client now reports the actual API/deployment problem instead.
+
+Vercel now supports [WebSockets in Functions (beta)](https://vercel.com/docs/functions/websockets), but this server is not yet adapted to that runtime. Keeping the app fully on Vercel requires exporting a supported server Function, configuring the routes, and moving persisted pages, sessions, presence, the ten-user counter and broadcasts into an external shared data store. Vercel documents that different connections may land on different instances, so the current in-memory Maps and local JSON file cannot safely provide the same collaboration behavior there. Changing only the password environment variable or suppressing the JSON parsing error does not solve that architecture mismatch.
+
+Deploying the existing version as the Render Web Service above matches its current architecture. Keeping Vercel requires that backend adaptation first.
+
+For a free-tier demonstration plan that preserves the existing runtime and storage, see [VERCEL-DEMO.md](VERCEL-DEMO.md).

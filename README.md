@@ -23,5 +23,4 @@ For step-by-step live hosting instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 For the requested free Vercel demonstration, see [VERCEL-DEMO.md](VERCEL-DEMO.md). It describes the necessary backend adapter, temporary shared state and reconnect behavior; those serverless changes are not implemented yet. Existing local runtime and storage remain intact.
 
-# WHITEBOARD
-bd5719bfb132d7665e47105791edd9b3bb44cd2b
+

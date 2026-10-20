@@ -3,7 +3,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from '
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
-import { DEFAULT_CODE } from './compiler-editor.js';
+import { DEFAULT_CODES, DEFAULT_CODE } from './compiler-editor.js';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 if (existsSync(root + '.env')) {
@@ -89,10 +89,11 @@ const server = http.createServer(async (req, res) => {
   json(404, { error: 'Not found.' });
 });
 const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
+const MAX_CAPACITY = 10;
 server.on('upgrade', (req, socket, head) => {
   const session = sessionFor(req);
   if (req.url !== '/socket' || !session || !sameOrigin(req)) { socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return; }
-  if (peers.size >= 10 || [...peers.values()].some(u => u.id === session.id)) { socket.end('HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\n'); return; }
+  if (peers.size >= MAX_CAPACITY || [...peers.values()].some(u => u.id === session.id)) { socket.end('HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\n'); return; }
   wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, session));
 });
 function validPath(p) {
@@ -124,7 +125,7 @@ wss.on('connection', (ws, session) => {
         if (typeof m.name !== 'string' || !m.name.trim() || m.name.length > 80 || pages.has(m.name) || pages.size >= 100) throw Error('Page exists or page limit reached.');
         const paths = m.paths || [];
         if (!Array.isArray(paths) || paths.length > 10000 || !paths.every(validPath)) throw Error('Invalid page contents.');
-        pages.set(m.name, { paths, code: typeof m.code === 'string' ? m.code.slice(0, 1000000) : DEFAULT_CODE, language: ['javascript','c','cpp','java'].includes(m.language) ? m.language : typeof m.code === 'string' ? 'javascript' : 'cpp', stdin:typeof m.stdin === 'string' ? m.stdin.slice(0,64000) : '', revision: 0, embedUrl: null });
+        pages.set(m.name, { paths, code: typeof m.code === 'string' ? m.code.slice(0, 1000000) : (DEFAULT_CODES[m.language] || DEFAULT_CODE), language: ['javascript','c','cpp','java'].includes(m.language) ? m.language : typeof m.code === 'string' ? 'javascript' : 'cpp', stdin:typeof m.stdin === 'string' ? m.stdin.slice(0,64000) : '', revision: 0, embedUrl: null });
         persist(); broadcast({ type: 'pages', pages: [...pages.keys()] });
         send(ws, { type: 'created', name: m.name, select: m.select });
       } else if (m.type === 'join' && pages.has(m.name)) {

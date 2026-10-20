@@ -1,6 +1,13 @@
 // OneCompiler's documented populateCode / codeChangeEvent bridge.
 export const COMPILER_ORIGIN = 'https://onecompiler.com';
-export const DEFAULT_CODE = '#include <iostream>\n\nint main() {\n    std::cout << "Hello, team!" << std::endl;\n    return 0;\n}\n';
+export const DEFAULT_CODES = {
+  javascript: 'console.log("Hello, team!");\n',
+  c: '#include <stdio.h>\n\nint main(void) {\n    printf("Hello, team!\\n");\n    return 0;\n}\n',
+  cpp: '#include <iostream>\n\nint main() {\n    std::cout << "Hello, team!" << std::endl;\n    return 0;\n}\n',
+  java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, team!");\n    }\n}\n',
+};
+
+export const DEFAULT_CODE = DEFAULT_CODES.cpp;
 export const LANGUAGE_FILES = {javascript:'index.js',c:'main.c',cpp:'main.cpp',java:'Main.java'};
 
 export function compilerUrl(language = 'cpp', theme = 'light') {
@@ -122,7 +129,27 @@ export function createCompilerEditor() {
     setValue:code => bridge.setState({...bridge.state,code}),
     getInput:() => bridge.state.stdin,
     setState:state => bridge.setState(state),
-    setLanguage:language => bridge.setState({...bridge.state,language}),
+    setLanguage: language => {
+      if (!Object.hasOwn(DEFAULT_CODES, language)) return;
+      if (language === bridge.state.language) return;
+
+      const current = bridge.state;
+      const hasCustomCode =
+        current.code.trim() &&
+        current.code !== DEFAULT_CODES[current.language];
+
+      if (hasCustomCode &&
+          !window.confirm('Replace the current code with starter code?')) {
+        document.getElementById('lang-select').value = current.language;
+        return;
+      }
+
+      bridge.setState({
+        language,
+        code: DEFAULT_CODES[language],
+        stdin: '',
+      });
+    },
     setTheme:value => { theme = value === 'dark' || value === 'vs-dark' ? 'dark' : 'light'; if (active) activate(activePage,true); },
     onDidChangeModelContent:listener => { listeners.add(listener); return {dispose:() => listeners.delete(listener)}; },
     layout:() => {},

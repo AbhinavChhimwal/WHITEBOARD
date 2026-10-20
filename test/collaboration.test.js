@@ -11,9 +11,11 @@ test('authentication, concurrent drawing, persistence, cursors and ten-person ca
   const password = 'Integration-test-password-very-long-123456!';
   const directory = mkdtempSync(join(tmpdir(), 'whiteboard-test-'));
   const server = spawn(process.execPath, ['server.js'], {env:{...process.env, DATA_DIR:directory, PORT:String(port), WHITEBOARD_PASSWORD:password}, stdio:['ignore','pipe','pipe']});
+  let startupError = '';
+  server.stderr.on('data', chunk => { startupError = (startupError + chunk).slice(-12000); });
   const clients = [];
   const name = `Integration ${Date.now()}`;
-  await new Promise((resolve,reject) => { server.stdout.once('data',resolve); server.once('error',reject); server.once('exit',code => reject(Error(`Server exited ${code}`))); });
+  await new Promise((resolve,reject) => { server.stdout.once('data',resolve); server.once('error',reject); server.once('close',code => reject(Error(`Server exited ${code}\n${startupError}`))); });
   async function login(pass = password, user = '') {
     return fetch(origin + '/api/login', {method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({name:user,password:pass})});
   }

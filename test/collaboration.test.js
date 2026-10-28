@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 test('authentication, concurrent drawing, persistence, cursors and ten-person capacity', async () => {
   const port = 3100 + Math.floor(Math.random() * 1000), origin = `http://localhost:${port}`;
-  const password = 'Integration-test-password-very-long-123456!';
+  const password = 'LET_ME_DRAW';
   const directory = mkdtempSync(join(tmpdir(), 'whiteboard-test-'));
   const server = spawn(process.execPath, ['server.js'], {env:{...process.env, DATA_DIR:directory, PORT:String(port), WHITEBOARD_PASSWORD:password}, stdio:['ignore','pipe','pipe']});
   let startupError = '';

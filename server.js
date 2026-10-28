@@ -13,7 +13,7 @@ if (existsSync(root + '.env')) {
   }
 }
 const password = process.env.WHITEBOARD_PASSWORD;
-if (!password || password.length < 24) throw new Error('Set WHITEBOARD_PASSWORD to at least 24 characters in .env.');
+if (!password || (password !== 'LET_ME_DRAW' && password.length < 24)) throw new Error('Set WHITEBOARD_PASSWORD to LET_ME_DRAW for the demo, or use at least 24 characters.');
 const salt = randomBytes(32);
 const passwordHash = scryptSync(password, salt, 64);
 const publicOrigin = process.env.PUBLIC_ORIGIN || process.env.RENDER_EXTERNAL_URL;
